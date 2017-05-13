@@ -21,9 +21,9 @@ syncing these records with a zone stored in Route 53 is also provided.
 DESC
   s.license                  =  'BSD'
   s.add_dependency(             'fog'                                         )
+  s.add_dependency(             'aws-sdk'                                     )
   s.files                    =  Dir['lib/**/*.rb', 'README']
   s.require_path             =  'lib'
   s.bindir                   =  'bin'
   s.executables              =  %w| zonify |
 end
-

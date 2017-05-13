@@ -1,6 +1,7 @@
 require 'yaml'
 
 require 'fog'
+require 'aws-sdk'
 
 
 module Zonify
@@ -21,23 +22,29 @@ class AWS
                                    :connection_options=>{:nonblock=>false} )
       options_ec2.delete(:reverse)
       options_ec2.delete(:zone)
-      ec2 = Proc.new{|| Fog::Compute.new(options_ec2) }
+      ec2 = Proc.new{| | Fog::Compute.new(options_ec2) }
       options_elb = options_ec2.dup.delete_if{|k, _| k == :provider }
-      elb = Proc.new{|| Fog::AWS::ELB.new(options_elb) }
+      elb = Proc.new{| | Fog::AWS::ELB.new(options_elb) }
       options_r53 = options_ec2.dup.delete_if{|k, _| k == :region }
-      r53 = Proc.new{|| Fog::DNS.new(options_r53) }
-      options.merge!(:ec2_proc=>ec2, :elb_proc=>elb, :r53_proc=>r53)
+      r53 = Proc.new{| | Fog::DNS.new(options_r53) }
+      r53_aws_sdk = Proc.new{| | Aws::Route53::Client.new(access_key_id: options[:aws_access_key_id],
+                                                          secret_access_key: options[:aws_secret_access_key],
+                                                          session_token: options[:aws_session_token],
+                                                          region: options[:region] ) }
+      options.merge!(:ec2_proc=>ec2, :elb_proc=>elb, :r53_proc=>r53, :r53_aws_sdk_proc=>r53_aws_sdk)
       Zonify::AWS.new(options)
     end
   end
-  attr_reader :ec2_proc, :elb_proc, :r53_proc
+  attr_reader :ec2_proc, :elb_proc, :r53_proc, :r53_aws_sdk_proc
   def initialize(opts={})
     @ec2      = opts[:ec2]
     @elb      = opts[:elb]
     @r53      = opts[:r53]
+    @r53_aws_sdk = opts[:r53_aws_sdk]
     @ec2_proc = opts[:ec2_proc]
     @elb_proc = opts[:elb_proc]
     @r53_proc = opts[:r53_proc]
+    @r53_aws_sdk_proc = opts[:r53_aws_sdk_proc]
     @reverse  = opts[:reverse]
     @zone     = opts[:zone]
   end
@@ -52,6 +59,9 @@ class AWS
   end
   def r53
     @r53 ||= @r53_proc.call
+  end
+  def r53_aws_sdk
+    @r53_aws_sdk ||= @r53_aws_sdk_proc.call
   end
   # Generate DNS entries based on EC2 instances, security groups and ELB load
   # balancers under the user's AWS account.
@@ -146,6 +156,27 @@ class AWS
         :prefix    => Zonify.cut_down_elb_name(elb.dns_name.downcase) }
     end
   end
+  def health_checks_ids
+    r53.list_health_checks.body['HealthChecks'].map { |hash| hash['Id'] }
+  end
+  def health_checks_tags
+    tags = []
+    health_checks_ids().each_slice(10) do |ids|
+      tags << r53_aws_sdk.list_tags_for_resources({
+        resource_type: 'healthcheck',
+        resource_ids: ids
+        }).resource_tag_sets
+    end
+    tags.flatten
+  end
+  def health_checks
+    hash = {}
+    health_checks_tags.each do |tag|
+      instance_id = tag.tags.find { |t| t.key === 'InstanceId' }
+      hash[instance_id.value] = tag.resource_id if instance_id
+    end
+    hash
+  end
   def eips
     ec2.addresses
   end
@@ -188,15 +219,15 @@ module RR
 extend self
   def srv(service, name)
     { :type=>'SRV', :value=>"0 0 0 #{Zonify.dot_(name)}",
-      :ttl=>'100',  :name=>"#{Zonify::Resolve::SRV_PREFIX}.#{service}" }
+      :ttl=>'100',  :name=>"#{Zonify::Resolve::SRV_PREFIX}.#{service}"}
   end
   def cname(name, dns, ttl='100')
     { :type=>'CNAME', :value=>Zonify.dot_(dns),
-      :ttl=>ttl,      :name=>Zonify.dot_(name) }
+      :ttl=>ttl,      :name=>Zonify.dot_(name)}
   end
 end
 
-# Given EC2 host and ELB data, construct unqualified DNS entries to make a
+# Given EC2 host, ELB data HealthChecks, construct unqualified DNS entries to make a
 # zone, of sorts.
 def zone(hosts, elbs)
   host_records = hosts.map do |id,info|
@@ -212,6 +243,7 @@ def zone(hosts, elbs)
       Zonify::RR.srv(tag_dn, name)
     end.compact
   end.flatten
+
   elb_records = elbs.map do |elb|
     running = elb[:instances].select{|i| hosts[i] }
     name = "#{elb[:prefix]}.elb."
@@ -260,7 +292,7 @@ end
 # associated with a set of equally weighted CNAMEs, one for each record.
 # Singleton SRVs are associated with a single CNAME. All resource record lists
 # are sorted and deduplicated.
-def normalize(tree)
+def normalize(tree, health_checks=nil)
   singles = Zonify.cname_singletons(tree)
   merged = Zonify.merge(tree, singles)
   remove, srvs = Zonify.srv_from_cnames(merged)
@@ -275,7 +307,7 @@ def normalize(tree)
     acc
   end
   stage2 = Zonify.merge(cleared, srvs)
-  multis = Zonify.cname_multitudinous(stage2)
+  multis = Zonify.cname_multitudinous(stage2, health_checks)
   stage3 = Zonify.merge(stage2, multis)
 end
 
@@ -321,7 +353,7 @@ end
 
 # For every SRV record that is not a singleton and that does not shadow an
 # existing CNAME, we create WRRs for item in the SRV record.
-def cname_multitudinous(tree)
+def cname_multitudinous(tree, health_checks=nil)
   tree.inject({}) do |acc, pair|
     name, info = pair
     name_clipped = name.sub("#{Zonify::Resolve::SRV_PREFIX}.", '')
@@ -331,6 +363,7 @@ def cname_multitudinous(tree)
           server = Zonify.dot_(rr.sub(/^([^ ]+ +){3}/, '').strip)
           id = server.split('.').first # Always the instance ID.
           new_data = data.merge(:value=>[server], :weight=>"16")
+          new_data[:health_check_id] = health_checks[id] if health_checks and health_checks[id]
           new_data = new_data.merge(:ttl => 5) if name.include?('pgbouncer')
           accumulator[id] = new_data
           accumulator

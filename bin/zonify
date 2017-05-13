@@ -109,14 +109,14 @@ def yaml_with_default(source, default)
   end
 end
 
-def normed_with_mappings(mapping_args, suffix, records, norm=true)
+def normed_with_mappings(mapping_args, suffix, records, norm=true, health_checks=nil)
   mappings = mapping_args.map{|s| Zonify::Mappings.parse(s) }
   abort 'Bad mapping parse.' if mappings.any?{|r| r.nil? }
   mappings.each{|k, v| ([k] + v).each{|s| check_name(s) } }
   clipped  = Zonify::Mappings.rewrite(records, [[suffix,['.']]])
   mapped   = Zonify::Mappings.rewrite(clipped, mappings)
   restored = Zonify::Mappings.rewrite(mapped, [['.',[suffix]]])
-  norm ? Zonify.normalize(restored) : restored
+  norm ? Zonify.normalize(restored, health_checks) : restored
 end
 
 def confirm_dialogue
@@ -224,7 +224,8 @@ def main
     check_name(suffix)
     new_records = aws.ec2_zone
     mappings = (ARGV[2..-1] or [])
-    mapped = normed_with_mappings(mappings, suffix, new_records)
+    health_checks = aws.health_checks
+    mapped = normed_with_mappings(mappings, suffix, new_records, true, health_checks)
     _, old_records = aws.route53_zone(suffix)
     changes = Zonify.diff(mapped, old_records, (types or %w| CNAME SRV |))
     STDERR.puts(display(changes)) if confirm or not quiet
