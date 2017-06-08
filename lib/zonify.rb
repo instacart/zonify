@@ -323,7 +323,7 @@ def cname_singletons(tree)
           Zonify.dot_(rr.sub(/^([^ ]+ +){3}/, '').strip)
         end
         new_data = data.merge(:value=>rr_clipped)
-        new_data = new_data.merge(:ttl => 5) if name.include?('pgbouncer')
+        new_data = new_data.merge(:ttl => '5') if name.include?('pgbouncer')
         acc[name_clipped] = { 'CNAME' => new_data }
       end
     end
@@ -343,7 +343,7 @@ def srv_from_cnames(tree)
         remove.push(name)
         rr_srv = data[:value].map{|s| '0 0 0 ' + s }
         acc[name_srv]      ||= { }
-        acc[name_srv]['SRV'] = { :ttl=>100, :value=>rr_srv }
+        acc[name_srv]['SRV'] = { :ttl=>'100', :value=>rr_srv }
       end
     end
     acc
@@ -364,7 +364,7 @@ def cname_multitudinous(tree, health_checks=nil)
           id = server.split('.').first # Always the instance ID.
           new_data = data.merge(:value=>[server], :weight=>"16")
           new_data[:health_check_id] = health_checks[id] if health_checks and health_checks[id]
-          new_data = new_data.merge(:ttl => 5) if name.include?('pgbouncer')
+          new_data = new_data.merge(:ttl => '5') if name.include?('pgbouncer')
           accumulator[id] = new_data
           accumulator
         end
