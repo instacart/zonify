@@ -138,9 +138,7 @@ class AWS
       # DNS entry.
       terminal_states = %w| terminated shutting-down |
       unless dns.nil? or dns.empty? or terminal_states.member? i.state
-        groups = (i.groups or [])
-        attrs = { :sg => groups,
-                  :tags => (i.tags or []),
+        attrs = { :tags => (i.tags or []),
                   :dns => Zonify.dot_(dns).downcase }
         if i.private_dns_name
           attrs[:priv] = i.private_dns_name.split('.').first.downcase
@@ -244,24 +242,7 @@ def zone(hosts, elbs)
     end.compact
   end.flatten
 
-  elb_records = elbs.map do |elb|
-    running = elb[:instances].select{|i| hosts[i] }
-    name = "#{elb[:prefix]}.elb."
-    running.map{|host| Zonify::RR.srv(name, "#{host}.inst.") }
-  end.flatten
-  sg_records = hosts.inject({}) do |acc, kv|
-    id, info = kv
-    info[:sg].each do |sg|
-      acc[sg] ||= []
-      acc[sg]  << id
-    end
-    acc
-  end.map do |sg, ids|
-    sg_ldh = Zonify.string_to_ldh(sg)
-    name = "#{sg_ldh}.sg."
-    ids.map{|id| Zonify::RR.srv(name, "#{id}.inst.") }
-  end.flatten
-  [host_records, elb_records, sg_records].flatten
+  [host_records].flatten
 end
 
 # Group DNS entries into a tree, with name at the top level, type at the
