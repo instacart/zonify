@@ -35,6 +35,7 @@ class AWS
   end
   attr_reader :ec2_proc, :r53_proc, :r53_aws_sdk_proc
   def initialize(opts={})
+    @region   = opts[:region]
     @ec2      = opts[:ec2]
     @r53      = opts[:r53]
     @r53_aws_sdk = opts[:r53_aws_sdk]
@@ -123,7 +124,11 @@ class AWS
     ec2.servers.inject({}) do |acc, i|
       dns = if reverse_public_ip? and not i.public_ip_address.nil?
               pub = i.public_ip_address
-              dns = "ec2-#{pub.gsub(".", "-")}.compute-1.amazonaws.com"
+              if @region && @region != 'us-east-1'
+                dns = "ec2-#{pub.gsub(".", "-")}.#{@region}.compute.amazonaws.com"
+              else
+                dns = "ec2-#{pub.gsub(".", "-")}.compute-1.amazonaws.com"
+              end
             else
               i.dns_name or i.private_dns_name
             end
@@ -498,8 +503,8 @@ def dot_(s)
   /[.]$/.match(s) ? s : "#{s}."
 end
 
-EC2_DNS_RE = /^ec2-([0-9]+)-([0-9]+)-([0-9]+)-([0-9]+)
-               [.]compute-[0-9]+[.]amazonaws[.]com[.]?$/x
+EC2_DNS_RE = /^ec2-([0-9]+)-([0-9]+)-([0-9]+)-([0-9]+)[.](\w.*)?\.?compute-?[0-9]?[.]amazonaws[.]com[.]?$/x
+
 def ec2_dns_to_ip(dns)
   "#{$1}.#{$2}.#{$3}.#{$4}" if EC2_DNS_RE.match(dns)
 end
