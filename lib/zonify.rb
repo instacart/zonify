@@ -23,27 +23,23 @@ class AWS
       options_ec2.delete(:reverse)
       options_ec2.delete(:zone)
       ec2 = Proc.new{| | Fog::Compute.new(options_ec2) }
-      options_elb = options_ec2.dup.delete_if{|k, _| k == :provider }
-      elb = Proc.new{| | Fog::AWS::ELB.new(options_elb) }
       options_r53 = options_ec2.dup.delete_if{|k, _| k == :region }
       r53 = Proc.new{| | Fog::DNS.new(options_r53) }
       r53_aws_sdk = Proc.new{| | Aws::Route53::Client.new(access_key_id: options[:aws_access_key_id],
                                                           secret_access_key: options[:aws_secret_access_key],
                                                           session_token: options[:aws_session_token],
                                                           region: options[:region] ) }
-      options.merge!(:ec2_proc=>ec2, :elb_proc=>elb, :r53_proc=>r53, :r53_aws_sdk_proc=>r53_aws_sdk)
+      options.merge!(:ec2_proc=>ec2, :r53_proc=>r53, :r53_aws_sdk_proc=>r53_aws_sdk)
       Zonify::AWS.new(options)
     end
   end
-  attr_reader :ec2_proc, :elb_proc, :r53_proc, :r53_aws_sdk_proc
+  attr_reader :ec2_proc, :r53_proc, :r53_aws_sdk_proc
   def initialize(opts={})
     @region   = opts[:region]
     @ec2      = opts[:ec2]
-    @elb      = opts[:elb]
     @r53      = opts[:r53]
     @r53_aws_sdk = opts[:r53_aws_sdk]
     @ec2_proc = opts[:ec2_proc]
-    @elb_proc = opts[:elb_proc]
     @r53_proc = opts[:r53_proc]
     @r53_aws_sdk_proc = opts[:r53_aws_sdk_proc]
     @reverse  = opts[:reverse]
@@ -55,9 +51,6 @@ class AWS
   def ec2
     @ec2 ||= @ec2_proc.call
   end
-  def elb
-    @elb ||= @elb_proc.call
-  end
   def r53
     @r53 ||= @r53_proc.call
   end
@@ -67,7 +60,7 @@ class AWS
   # Generate DNS entries based on EC2 instances, security groups and ELB load
   # balancers under the user's AWS account.
   def ec2_zone
-    Zonify.tree(Zonify.zone(instances, load_balancers))
+    Zonify.tree(Zonify.zone(instances))
   end
   # Retrieve Route53 zone data -- the zone ID as well as resource records --
   # relevant to the given suffix. When there is any ambiguity, the zone with
@@ -120,6 +113,7 @@ class AWS
         end
         begin
           r53.change_resource_record_sets(zone.id, rekeyed, :comment=>comment)
+          sleep 1
         rescue Fog::Errors::Error => e
           STDERR.puts("Failed with some records, due to:\n#{e}")
         end
@@ -143,22 +137,11 @@ class AWS
       # DNS entry.
       terminal_states = %w| terminated shutting-down |
       unless dns.nil? or dns.empty? or terminal_states.member? i.state
-        groups = (i.groups or [])
-        attrs = { :sg => groups,
-                  :tags => (i.tags or []),
+        attrs = { :tags => (i.tags or []),
                   :dns => Zonify.dot_(dns).downcase }
-        if i.private_dns_name
-          attrs[:priv] = i.private_dns_name.split('.').first.downcase
-        end
         acc[i.id] = attrs
       end
       acc
-    end
-  end
-  def load_balancers
-    elb.load_balancers.map do |elb|
-      { :instances => elb.instances,
-        :prefix    => Zonify.cut_down_elb_name(elb.dns_name.downcase) }
     end
   end
   def health_checks_ids
@@ -234,39 +217,25 @@ end
 
 # Given EC2 host, ELB data HealthChecks, construct unqualified DNS entries to make a
 # zone, of sorts.
-def zone(hosts, elbs)
+def zone(hosts)
   host_records = hosts.map do |id,info|
     name = "#{id}.inst."
     priv = "#{info[:priv]}.priv."
-    [ Zonify::RR.cname(name, info[:dns], '600'),
-      Zonify::RR.cname(priv, info[:dns], '600'),
-      Zonify::RR.srv('inst.', name) ] +
+    [ Zonify::RR.cname(name, info[:dns], '600') ] +
     info[:tags].map do |tag|
       k, v = tag
       next if k.nil? or v.nil? or k.empty? or v.empty?
+      next if k == 'Name'
+      next if k == 'domain'
+      next if k == 'cloud'
+      next if k.match(/^aws/)
+      next if k.match(/pika.ac$/)
       tag_dn = "#{Zonify.string_to_ldh(v)}.#{Zonify.string_to_ldh(k)}.tag."
       Zonify::RR.srv(tag_dn, name)
     end.compact
   end.flatten
 
-  elb_records = elbs.map do |elb|
-    running = elb[:instances].select{|i| hosts[i] }
-    name = "#{elb[:prefix]}.elb."
-    running.map{|host| Zonify::RR.srv(name, "#{host}.inst.") }
-  end.flatten
-  sg_records = hosts.inject({}) do |acc, kv|
-    id, info = kv
-    info[:sg].each do |sg|
-      acc[sg] ||= []
-      acc[sg]  << id
-    end
-    acc
-  end.map do |sg, ids|
-    sg_ldh = Zonify.string_to_ldh(sg)
-    name = "#{sg_ldh}.sg."
-    ids.map{|id| Zonify::RR.srv(name, "#{id}.inst.") }
-  end.flatten
-  [host_records, elb_records, sg_records].flatten
+  [host_records].flatten
 end
 
 # Group DNS entries into a tree, with name at the top level, type at the
@@ -452,7 +421,7 @@ def diff(new_records, old_records, types=['CNAME','SRV'])
     v.map do |type, data|
       if types.member? '*' or types.member? type
         new_data = ((new and new[type]) or {})
-        unless Zonify.compare_records(data, new_data)
+        unless !new_records.key?(name) or Zonify.compare_records(data, new_data)
           Zonify.hoist(data, name, type, 'DELETE')
         end
       end
@@ -505,11 +474,6 @@ def read_octal(s)
     acc << $1.oct
   end
   acc
-end
-
-ELB_DNS_RE = /^([a-z0-9-]+)-[^-.]+[.].+$/
-def cut_down_elb_name(s)
-  $1 if ELB_DNS_RE.match(s)
 end
 
 LDH_RE = /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])$/
