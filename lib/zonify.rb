@@ -230,6 +230,7 @@ def zone(hosts)
       next if k == 'aws:cloudformation:stack-id'
       next if k == 'aws:cloudformation:stack-name'
       next if k == 'aws-elasticmapreduce-instance-group-role'
+      next if k == 'aws-cloudformation-stack-id'
       tag_dn = "#{Zonify.string_to_ldh(v)}.#{Zonify.string_to_ldh(k)}.tag."
       Zonify::RR.srv(tag_dn, name)
     end.compact
