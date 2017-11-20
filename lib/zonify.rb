@@ -225,12 +225,7 @@ def zone(hosts)
     info[:tags].map do |tag|
       k, v = tag
       next if k.nil? or v.nil? or k.empty? or v.empty?
-      next if k == 'aws:autoscaling:groupName'
-      next if k == 'aws:cloudformation:logical-id'
-      next if k == 'aws:cloudformation:stack-id'
-      next if k == 'aws:cloudformation:stack-name'
-      next if k == 'aws-elasticmapreduce-instance-group-role'
-      next if k == 'aws-cloudformation-stack-id'
+      next if k.match(/^aws/)
       tag_dn = "#{Zonify.string_to_ldh(v)}.#{Zonify.string_to_ldh(k)}.tag."
       Zonify::RR.srv(tag_dn, name)
     end.compact
