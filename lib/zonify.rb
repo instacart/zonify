@@ -225,7 +225,7 @@ def zone(hosts)
     info[:tags].map do |tag|
       k, v = tag
       next if k.nil? or v.nil? or k.empty? or v.empty?
-      next if k == 'name'
+      next if k == 'Name'
       next if k == 'domain'
       next if k == 'cloud'
       next if k.match(/^aws/)
