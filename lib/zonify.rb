@@ -113,6 +113,7 @@ class AWS
         end
         begin
           r53.change_resource_record_sets(zone.id, rekeyed, :comment=>comment)
+          sleep 1
         rescue Fog::Errors::Error => e
           STDERR.puts("Failed with some records, due to:\n#{e}")
         end
@@ -138,9 +139,6 @@ class AWS
       unless dns.nil? or dns.empty? or terminal_states.member? i.state
         attrs = { :tags => (i.tags or []),
                   :dns => Zonify.dot_(dns).downcase }
-        if i.private_dns_name
-          attrs[:priv] = i.private_dns_name.split('.').first.downcase
-        end
         acc[i.id] = attrs
       end
       acc
