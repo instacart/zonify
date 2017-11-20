@@ -225,6 +225,8 @@ def zone(hosts)
     info[:tags].map do |tag|
       k, v = tag
       next if k.nil? or v.nil? or k.empty? or v.empty?
+      next if k == 'name'
+      next if k == 'domain'
       next if k.match(/^aws/)
       tag_dn = "#{Zonify.string_to_ldh(v)}.#{Zonify.string_to_ldh(k)}.tag."
       Zonify::RR.srv(tag_dn, name)
