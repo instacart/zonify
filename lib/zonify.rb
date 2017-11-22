@@ -228,8 +228,9 @@ def zone(hosts)
       next if k == 'Name'
       next if k == 'domain'
       next if k == 'cloud'
+      next if k == 'role'
       next if k.match(/^aws/)
-      next if k.match(/pika.ac$/)
+      next if v.match(/pika.ac$/)
       tag_dn = "#{Zonify.string_to_ldh(v)}.#{Zonify.string_to_ldh(k)}.tag."
       Zonify::RR.srv(tag_dn, name)
     end.compact
