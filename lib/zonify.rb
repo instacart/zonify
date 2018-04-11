@@ -229,6 +229,7 @@ def zone(hosts)
       next if k.downcase == 'cloud'
       next if k.downcase == 'name'
       next if k.downcase == 'terraform'
+      next if k.downcase == 'team'
       next if k.downcase == 'group'
       next if k.downcase == 'environment'
       next if k.downcase == 'role'
