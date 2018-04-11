@@ -225,10 +225,12 @@ def zone(hosts)
     info[:tags].map do |tag|
       k, v = tag
       next if k.nil? or v.nil? or k.empty? or v.empty?
-      next if k == 'domain'
-      next if k == 'cloud'
-      next if k == 'role'
-      next if k == 'createdby'
+      next if k.downcase == 'domain'
+      next if k.downcase == 'cloud'
+      next if k.downcase == 'name'
+      next if k.downcase == 'terraform'
+      next if k.downcase == 'role'
+      next if k.downcase == 'createdby'
       next if k.match(/^aws/)
       next if v.match(/pika.ac$/)
       tag_dn = "#{Zonify.string_to_ldh(v)}.#{Zonify.string_to_ldh(k)}.tag."
