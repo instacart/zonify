@@ -227,7 +227,6 @@ def zone(hosts)
       next if k.nil? or v.nil? or k.empty? or v.empty?
       next if k.downcase == 'domain'
       next if k.downcase == 'cloud'
-      next if k.downcase == 'name'
       next if k.downcase == 'terraform'
       next if k.downcase == 'team'
       next if k.downcase == 'group'
